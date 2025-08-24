@@ -1,0 +1,32 @@
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# envs
+.venv/
+venv/
+env/
+
+# git / ide
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# local secrets / artifacts
+.env
+.env.*
+!.env.example
+cookies.txt
+cookies/
+
+# media / temp
+*.wav
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.srt
+tmp/
+temp/

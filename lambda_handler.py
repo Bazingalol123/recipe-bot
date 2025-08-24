@@ -1,29 +1,34 @@
-# lambda_handler.py
-import os, json, base64, requests
-from app_pipeline import process_link
+# lambda_handler.py — Telegram webhook for Lambda
+import os, json, base64, logging, requests
+from app_pipeline import process_link, find_first_url, SUPPORTED
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
-# WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")  # optional
+# WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")  # optional
 
-def send_text(chat_id: int, text: str, parse_mode: str | None = None):
-    requests.post(f"{TG}/sendMessage", json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode})
+log = logging.getLogger()
+log.setLevel(logging.INFO)
+
+def send_text(chat_id: int, text: str, markdown: bool = False):
+    data = {"chat_id": chat_id, "text": text}
+    if markdown:
+        data["parse_mode"] = "Markdown"
+    requests.post(f"{TG}/sendMessage", json=data, timeout=15)
 
 def send_document(chat_id: int, filename: str, content: bytes):
     files = {"document": (filename, content, "application/json")}
     data = {"chat_id": chat_id}
-    requests.post(f"{TG}/sendDocument", data=data, files=files)
+    requests.post(f"{TG}/sendDocument", data=data, files=files, timeout=30)
 
 def lambda_handler(event, context):
-    # OPTIONAL: verify secret header set by Telegram if you used setWebhook ...&secret_token=...
-    if WEBHOOK_SECRET:
-        hdr = (event.get("headers") or {}).get("x-telegram-bot-api-secret-token") \
-              or (event.get("headers") or {}).get("X-Telegram-Bot-Api-Secret-Token")
-        if hdr != WEBHOOK_SECRET:
-            return {"statusCode": 401, "body": "unauthorized"}
+    # Optional secret verification (if you set setWebhook&secret_token=...)
+    # if WEBHOOK_SECRET:
+    #     hdrs = event.get("headers") or {}
+    #     recv = hdrs.get("x-telegram-bot-api-secret-token") or hdrs.get("X-Telegram-Bot-Api-Secret-Token")
+    #     if recv != WEBHOOK_SECRET:
+    #         return {"statusCode": 401, "body": "unauthorized"}
 
-    # Parse the Telegram update JSON
-    body_raw = event.get("body", "{}")
+    body_raw = event.get("body") or "{}"
     if event.get("isBase64Encoded"):
         body_raw = base64.b64decode(body_raw).decode("utf-8")
     update = json.loads(body_raw)
@@ -31,21 +36,35 @@ def lambda_handler(event, context):
     msg = update.get("message") or update.get("edited_message") or {}
     chat = msg.get("chat") or {}
     chat_id = chat.get("id")
-    text = msg.get("text", "")
+    text = (msg.get("text") or "").strip()
 
     if not chat_id:
-        return {"statusCode": 200, "body": "ok"}  # ignore unsupported updates
+        return {"statusCode": 200, "body": "ok"}
 
-    # Quick user feedback
-    send_text(chat_id, "✅ Link received. Downloading → transcribing → generating recipe…")
+    # Commands
+    if text.startswith("/start"):
+        send_text(chat_id,
+            "שלום! שלח/י לי קישור של TikTok / Instagram / Facebook עם מתכון, "
+            "ואחזיר לך גרסה מסודרת + JSON.")
+        return {"statusCode": 200, "body": "ok"}
 
+    if text.startswith("/ping"):
+        send_text(chat_id, "pong ✅")
+        return {"statusCode": 200, "body": "ok"}
+
+    # Must contain a supported link
+    url = find_first_url(text)
+    if not url or not any(root in url.lower() for root in SUPPORTED):
+        send_text(chat_id, "לא זוהה קישור נתמך. שלח/י קישור של TikTok / Instagram / Facebook.")
+        return {"statusCode": 200, "body": "ok"}
+
+    send_text(chat_id, "✅ הקישור תקין. מוריד → מתמלל → מחלץ מתכון…")
     try:
         pretty, recipe_bytes = process_link(text)
-        send_text(chat_id, pretty, parse_mode="Markdown")
+        send_text(chat_id, pretty, markdown=True)
         send_document(chat_id, "recipe.json", recipe_bytes)
     except Exception as e:
-        send_text(chat_id, f"❌ Error: {e}")
+        log.exception("pipeline error")
+        send_text(chat_id, f"❌ שגיאה: {e}")
 
-    # NOTE: This handler returns after all work is done. For high scale or strict webhook timeouts,
-    # we can switch to a 2-Lambda pattern (webhook -> SQS -> worker). We'll do that in a later stage.
     return {"statusCode": 200, "body": "ok"}

@@ -1,0 +1,71 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Packaging / build ---
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# --- Testing / typing / coverage ---
+.pytest_cache/
+.coverage*
+htmlcov/
+.mypy_cache/
+.pytype/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# --- Jupyter / docs ---
+.ipynb_checkpoints/
+site/
+
+# --- Tools & editors ---
+.vscode/
+.idea/
+*.code-workspace
+
+# --- OS cruft ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Project-specific secrets/artifacts ---
+# (Never commit secrets. Use .env locally and env vars in prod.)
+.env
+.env.*
+!.env.example
+cookies.txt
+cookies/
+*.key
+*.pem
+
+# --- Media / temp (defensive; our app uses system temp anyway) ---
+*.wav
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.srt
+/tmp/
+temp/

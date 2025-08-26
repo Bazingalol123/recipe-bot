@@ -20,8 +20,8 @@ jobs:
 
       - name: Validate HTML
         run: |
-          if ! grep -q "<html" frontend/dashboard.html; then
-            echo "dashboard.html missing <html> tag"
+          if ! grep -q "<html" frontend/index.html; then
+            echo "index.html missing <html> tag"
             exit 1
           fi
 
@@ -39,12 +39,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Upload dashboard.html to S3
+      - name: Upload index.html to S3
         run: |
-          aws s3 cp frontend/dashboard.html s3://$S3_BUCKET/dashboard.html --acl public-read
+          aws s3 cp frontend/index.html s3://$S3_BUCKET/index.html --acl public-read
 
       - name: Invalidate CloudFront cache
         run: |
           aws cloudfront create-invalidation \
             --distribution-id $CLOUDFRONT_ID \
-            --paths "/dashboard.html"
+            --paths "/index.html"

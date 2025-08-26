@@ -1,4 +1,4 @@
-name: CI — Build & Push Docker images to ECR
+name: CI — Deploy frontend to S3 + CloudFront
 
 on:
   push:
@@ -7,83 +7,26 @@ on:
     branches: [ main ]
 
 env:
-  ECR_REGISTRY: 700903221869.dkr.ecr.eu-north-1.amazonaws.com
-  ECR_REPOSITORY: recipe-bot
   AWS_REGION: eu-north-1
+  S3_BUCKET: recipe-bot-frontend
+  CLOUDFRONT_ID: dc61h2yo7vgoh.cloudfront.net   # <-- replace with your real distribution ID
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install deps (backend)
+      - name: Validate HTML
         run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-
-      - name: Syntax check (compile backend)
-        run: |
-          python -m py_compile backend/*.py
-
-      - name: Run smoke test
-        run: python smoke_test.py
-
-
-  build-and-push:
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        run: |
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v4
-        with:
-          context: backend
-          file: backend/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:backend-${{ github.sha }}
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:backend-latest
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v4
-        with:
-          context: frontend
-          file: frontend/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:frontend-${{ github.sha }}
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:frontend-latest
+          if ! grep -q "<html" frontend/dashboard.html; then
+            echo "dashboard.html missing <html> tag"
+            exit 1
+          fi
 
   deploy:
-    needs: build-and-push
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -96,17 +39,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Sync frontend to S3
+      - name: Upload dashboard.html to S3
         run: |
-          aws s3 sync frontend/ s3://recipe-bot-frontend/ --delete
+          aws s3 cp frontend/dashboard.html s3://$S3_BUCKET/dashboard.html --acl public-read
 
       - name: Invalidate CloudFront cache
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id dc61h2yo7vgoh.cloudfront.net \
-            --paths "/*"
-
-# Notes:
-# - Ensure GitHub secrets: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are configured.
-# - The workflow pushes two images to the same ECR repository with different tags (backend/frontend).
-# - To automatically deploy, add steps using aws ecs update-service, kubectl, or other provider.
+            --distribution-id $CLOUDFRONT_ID \
+            --paths "/dashboard.html"

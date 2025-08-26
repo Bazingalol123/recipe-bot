@@ -41,7 +41,7 @@ jobs:
 
       - name: Upload index.html to S3
         run: |
-          aws s3 cp frontend/index.html s3://$S3_BUCKET/index.html --acl public-read
+          aws s3 cp frontend/index.html s3://$S3_BUCKET/index.html
 
       - name: Invalidate CloudFront cache
         run: |

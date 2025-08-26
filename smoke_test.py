@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv(".venv/.env")
 
-import lambda_handler
+import backend.lambda_handler as lambda_handler
 
 # Minimal Telegram event with /ping command
 event = {

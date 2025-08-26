@@ -78,18 +78,27 @@ jobs:
             ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:frontend-${{ github.sha }}
             ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:frontend-latest
 
-  deploy:
+    deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: always()
     steps:
-      - name: Deployment placeholder
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update backend Lambda
         run: |
-          echo "Images pushed to ECR:"
-          echo "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:backend-${{ github.sha }}"
-          echo "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:frontend-${{ github.sha }}"
-          echo ""
-          echo "Add a deployment step to update ECS / EKS / Cloud Run or other target here."
+          aws lambda update-function-code \
+            --function-name recipe-bot-backend \
+            --image-uri ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:backend-${{ github.sha }}
+
+      - name: Deploy frontend to S3
+        run: |
+          aws s3 sync frontend/ s3://recipe-bot-frontend/ --delete
+          aws cloudfront create-invalidation --distribution-id dc61h2yo7vgoh.cloudfront.net --paths "/*"
 
 # Notes:
 # - Ensure GitHub secrets: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are configured.

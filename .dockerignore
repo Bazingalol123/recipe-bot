@@ -18,8 +18,7 @@ env/
 .env
 .env.*
 !.env.example
-cookies.txt
-cookies/
+
 
 # media / temp
 *.wav

@@ -1,0 +1,6 @@
+openai
+yt-dlp
+requests
+python-dotenv
+awslambdaric
+boto3

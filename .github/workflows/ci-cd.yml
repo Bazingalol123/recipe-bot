@@ -9,7 +9,7 @@ on:
 env:
   AWS_REGION: eu-north-1
   S3_BUCKET: recipe-bot-frontend
-  CLOUDFRONT_ID: dc61h2yo7vgoh.cloudfront.net   # <-- replace with your real distribution ID
+  CLOUDFRONT_ID: E7FDEKNIL2S0Z  # <-- replace with your real distribution ID
 
 jobs:
   test:
@@ -46,5 +46,5 @@ jobs:
       - name: Invalidate CloudFront cache
         run: |
           aws cloudfront create-invalidation \
-            --distribution-id dc61h2yo7vgoh.cloudfront.net \
+            --distribution-id $CLOUDFRONT_ID \
             --paths "/index.html"

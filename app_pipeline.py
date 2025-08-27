@@ -337,7 +337,6 @@ RECIPE_TOOL_PARAMETERS = {
   "additionalProperties": False,
   "properties": {
     "title": {"type": "string"},
-    "source_url": {"type": "string"},
     "lang": {"type": "string", "enum": ["he"]},
     "servings": {"type": ["integer", "null"]},
     "total_time_minutes": {"type": ["integer", "null"]},
@@ -435,7 +434,6 @@ def make_recipe(transcript: str, source_url: str, meta: dict) -> dict:
         data = _parse_tool_args(r.tool_calls[0].function.arguments)
         if "_parse_error" not in data:
             data.setdefault("raw", {})["transcript"] = transcript[:1200]
-            data["source_url"] = source_url
             data["lang"] = "he"
             return data
 
@@ -525,7 +523,6 @@ def validate_and_repair(r: dict, meta: dict | None = None) -> dict:
             conf = min(conf, 0.35)
 
     r["lang"] = "he"
-    r["source_url"] = r.get("source_url") or None
     r["confidence"] = conf
     logger.info("Validation complete, confidence: %s", r.get("confidence"))
     return r

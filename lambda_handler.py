@@ -1,33 +1,55 @@
-# lambda_handler.py — Telegram webhook for Lambda
-import os, json, base64, logging, requests
+# lambda_handler.py — Telegram webhook for Lambda (async self-invoke)
+# -*- coding: utf-8 -*-
+import os, json, base64, logging, requests, boto3
 from app_pipeline import process_link, find_first_url, SUPPORTED
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
-# WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")  # optional
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
+
+# for async self-invocation
+LAMBDA_FN_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
+_lambda = boto3.client("lambda")
 
 def send_text(chat_id: int, text: str, markdown: bool = False):
     data = {"chat_id": chat_id, "text": text}
     if markdown:
         data["parse_mode"] = "Markdown"
-    requests.post(f"{TG}/sendMessage", json=data, timeout=15)
+    try:
+        requests.post(f"{TG}/sendMessage", json=data, timeout=15)
+    except Exception:
+        log.exception("send_text failed")
 
 def send_document(chat_id: int, filename: str, content: bytes):
     files = {"document": (filename, content, "application/json")}
     data = {"chat_id": chat_id}
-    requests.post(f"{TG}/sendDocument", data=data, files=files, timeout=30)
+    try:
+        requests.post(f"{TG}/sendDocument", data=data, files=files, timeout=30)
+    except Exception:
+        log.exception("send_document failed")
+
+def _process_job(chat_id: int, text: str):
+    """Worker: heavy pipeline and final replies."""
+    try:
+        pretty, recipe_bytes = process_link(text)
+        send_text(chat_id, pretty, markdown=True)
+        send_document(chat_id, "recipe.json", recipe_bytes)
+    except Exception as e:
+        log.exception("pipeline error")
+        send_text(chat_id, f"❌ שגיאה: {e}")
 
 def lambda_handler(event, context):
-    # Optional secret verification (if you set setWebhook&secret_token=...)
-    # if WEBHOOK_SECRET:
-    #     hdrs = event.get("headers") or {}
-    #     recv = hdrs.get("x-telegram-bot-api-secret-token") or hdrs.get("X-Telegram-Bot-Api-Secret-Token")
-    #     if recv != WEBHOOK_SECRET:
-    #         return {"statusCode": 401, "body": "unauthorized"}
+    # -------- Worker branch (async self-invoke) --------
+    if isinstance(event, dict) and event.get("mode") == "process":
+        chat_id = event.get("chat_id")
+        text = event.get("text") or ""
+        if chat_id:
+            _process_job(chat_id, text)
+        return {"statusCode": 200, "body": "ok"}
 
+    # -------- Webhook branch (must return 2xx fast) --------
     body_raw = event.get("body") or "{}"
     if event.get("isBase64Encoded"):
         body_raw = base64.b64decode(body_raw).decode("utf-8")
@@ -38,14 +60,19 @@ def lambda_handler(event, context):
     chat_id = chat.get("id")
     text = (msg.get("text") or "").strip()
 
+    # ignore our own bot messages to prevent echo-loops
+    from_user = msg.get("from") or {}
+    if from_user.get("is_bot"):  # User object has is_bot flag
+        return {"statusCode": 200, "body": "ok"}  # ack and drop
+
     if not chat_id:
         return {"statusCode": 200, "body": "ok"}
 
-    # Commands
+    # Commands (fast paths)
     if text.startswith("/start"):
         send_text(chat_id,
-            "שלום! שלח/י לי קישור של TikTok / Instagram / Facebook עם מתכון, "
-            "ואחזיר לך גרסה מסודרת + JSON.")
+                  "שלום! שלח/י לי קישור של TikTok / Instagram / Facebook עם מתכון, "
+                  "ואחזיר גרסה מסודרת + JSON.")
         return {"statusCode": 200, "body": "ok"}
 
     if text.startswith("/ping"):
@@ -58,13 +85,23 @@ def lambda_handler(event, context):
         send_text(chat_id, "לא זוהה קישור נתמך. שלח/י קישור של TikTok / Instagram / Facebook.")
         return {"statusCode": 200, "body": "ok"}
 
+    # Tell user we started, then hand off to async worker and ACK immediately
     send_text(chat_id, "✅ הקישור תקין. מוריד → מתמלל → מחלץ מתכון…")
-    try:
-        pretty, recipe_bytes = process_link(text)
-        send_text(chat_id, pretty, markdown=True)
-        send_document(chat_id, "recipe.json", recipe_bytes)
-    except Exception as e:
-        log.exception("pipeline error")
-        send_text(chat_id, f"❌ שגיאה: {e}")
 
+    # Fire-and-forget self-invoke so webhook returns 200 fast
+    try:
+        _lambda.invoke(
+            FunctionName=LAMBDA_FN_NAME,
+            InvocationType="Event",  # async
+            Payload=json.dumps({
+                "mode": "process",
+                "chat_id": chat_id,
+                "text": text
+            }).encode("utf-8"),
+        )
+    except Exception:
+        log.exception("async invoke failed")
+        send_text(chat_id, "❌ שגיאה פנימית בהגשת המשימה. נסו שוב מאוחר יותר.")
+
+    # Critical: return 2xx quickly so Telegram doesn't retry
     return {"statusCode": 200, "body": "ok"}

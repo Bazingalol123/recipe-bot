@@ -1,0 +1,3 @@
+# Runtime deps for your HTTP API Lambda
+# (RIC already in the AWS Lambda base image; no need to add awslambdaric)
+boto3==1.34.160   # include only if the API calls AWS services

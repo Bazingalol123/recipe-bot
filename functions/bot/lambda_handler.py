@@ -8,6 +8,26 @@ TG = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
+ALLOWED_ORIGIN = "https://d2s7k5uevi4xe8.cloudfront.net"
+REST_PATH = os.getenv("REST_PATH", "/rest")  
+
+
+def _cors_headers():
+    return {
+        "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+        "Access-Control-Allow-Headers": "Content-Type,content-type",
+        "Access-Control-Allow-Methods": "OPTIONS,POST",
+    }
+
+def _get_method(event: dict) -> str | None:
+    # API Gateway REST: httpMethod
+    m = event.get("httpMethod")
+    if m: return m
+    # Function URL / HTTP API v2: requestContext.http.method
+    return (event.get("requestContext") or {}).get("http", {}).get("method")
+
+def _get_path(event: dict) -> str:
+    return event.get("path") or event.get("rawPath") or "/"
 
 # for async self-invocation
 LAMBDA_FN_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
@@ -41,13 +61,51 @@ def _process_job(chat_id: int, text: str):
         send_text(chat_id, f"❌ שגיאה: {e}")
 
 def lambda_handler(event, context):
+    method = _get_method(event)
+    path = _get_path(event)
+    log.info("Incoming method=%s path=%s", method, path)
+
+    # --- REST API for Vue (CORS preflight only for /rest) ---
+    if method == "OPTIONS" and path == REST_PATH:
+        return {"statusCode": 200, "headers": _cors_headers(), "body": ""}
+
+    # --- REST API for Vue (POST only for /rest) ---
+    if method == "POST" and path == REST_PATH:
+        try:
+            body_raw = event.get("body") or "{}"
+            if event.get("isBase64Encoded"):
+                body_raw = base64.b64decode(body_raw).decode("utf-8")
+            body = json.loads(body_raw)
+            url = body.get("url")
+            if not url:
+                return {
+                    "statusCode": 400,
+                    "headers": {"Content-Type": "application/json", **_cors_headers()},
+                    "body": json.dumps({"error": "Missing url"})
+                }
+
+            pretty, recipe_bytes = process_link(url)
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "application/json", **_cors_headers()},
+                "body": recipe_bytes.decode("utf-8"),
+            }
+        except Exception as e:
+            log.exception("[REST] Failed to process request")
+            return {
+                "statusCode": 500,
+                "headers": {"Content-Type": "application/json", **_cors_headers()},
+                "body": json.dumps({"error": str(e)})
+            }
+
+
     # -------- Worker branch (async self-invoke) --------
     if isinstance(event, dict) and event.get("mode") == "process":
         chat_id = event.get("chat_id")
         text = event.get("text") or ""
         if chat_id:
             _process_job(chat_id, text)
-        return {"statusCode": 200, "body": "ok"}
+        return {"statusCode": 200, "headers": _cors_headers(), "body": "ok"}
 
     # -------- Webhook branch (must return 2xx fast) --------
     body_raw = event.get("body") or "{}"
@@ -63,28 +121,27 @@ def lambda_handler(event, context):
     # ignore our own bot messages to prevent echo-loops
     from_user = msg.get("from") or {}
     if from_user.get("is_bot"):  # User object has is_bot flag
-        return {"statusCode": 200, "body": "ok"}  # ack and drop
+        return {"statusCode": 200, "headers": _cors_headers(), "body": "ok"}  # ack and drop
 
     if not chat_id:
-        return {"statusCode": 200, "body": "ok"}
+        return {"statusCode": 200, "headers": _cors_headers(), "body": "ok"}
 
     # Commands (fast paths)
     if text.startswith("/start"):
         send_text(chat_id,
                   "שלום! שלח/י לי קישור של TikTok / Instagram / Facebook עם מתכון, "
                   "ואחזיר גרסה מסודרת + JSON.")
-        return {"statusCode": 200, "body": "ok"}
+        return {"statusCode": 200, "headers": _cors_headers(), "body": "ok"}
 
     if text.startswith("/ping"):
         send_text(chat_id, "pong ✅")
-        return {"statusCode": 200, "body": "ok"}
+        return {"statusCode": 200, "headers": _cors_headers(), "body": "ok"}
 
     # Must contain a supported link
     url = find_first_url(text)
     if not url or not any(root in url.lower() for root in SUPPORTED):
         send_text(chat_id, "לא זוהה קישור נתמך. שלח/י קישור של TikTok / Instagram / Facebook.")
-        return {"statusCode": 200, "body": "ok"}
-
+        return {"statusCode": 200, "headers": _cors_headers(), "body": "ok"}
     # Tell user we started, then hand off to async worker and ACK immediately
     send_text(chat_id, "✅ הקישור תקין. מוריד → מתמלל → מחלץ מתכון…")
 
@@ -104,4 +161,4 @@ def lambda_handler(event, context):
         send_text(chat_id, "❌ שגיאה פנימית בהגשת המשימה. נסו שוב מאוחר יותר.")
 
     # Critical: return 2xx quickly so Telegram doesn't retry
-    return {"statusCode": 200, "body": "ok"}
+    return {"statusCode": 200, "headers": _cors_headers(), "body": "ok"}

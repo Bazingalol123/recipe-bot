@@ -2,17 +2,30 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.DS_Store
+*.pyc
+
+#node
+node_modules
 
 # envs
 .venv/
 venv/
 env/
+*.log
+
 
 # git / ide
 .git/
 .gitignore
 .vscode/
 .idea/
+
+# UI
+
+frontend/
+webapp/
+dist/
 
 # local secrets / artifacts
 .env
